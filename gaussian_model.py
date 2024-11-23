@@ -10,13 +10,14 @@
 #
 
 import torch
-from torch import nn
+from simple_knn._C import distCUDA2
 
 from gaussian_splatting.utils.general_utils import (
     inverse_sigmoid,
     strip_symmetric,
     build_scaling_rotation,
 )
+from gaussian_splatting.utils.sh_utils import RGB2SH
 
 
 class GaussianModel:
@@ -94,26 +95,47 @@ class GaussianModel:
             self.get_scaling, scaling_modifier, self._rotation
         )
 
-    def create_from_pcd(self, fused_point_cloud, features, scales, rots, opacities):
-        self._xyz = nn.Parameter(fused_point_cloud)
-        self._features_dc = nn.Parameter(
-            features[:, :, 0:1].transpose(1, 2).contiguous()
-        )
-        self._features_rest = nn.Parameter(
-            features[:, :, 1:].transpose(1, 2).contiguous()
-        )
-        self._scaling = nn.Parameter(scales)
-        self._rotation = nn.Parameter(rots)
-        self._opacity = nn.Parameter(opacities)
+    def create_from_params(self, fused_point_cloud, features, scales, rots, opacities):
+        self._xyz = fused_point_cloud.clone()
+        self._features_dc = features[:, :, 0:1].clone().transpose(1, 2).contiguous()
+        self._features_rest = features[:, :, 1:].clone().transpose(1, 2).contiguous()
+        self._scaling = scales.clone()
+        self._rotation = rots.clone()
+        self._opacity = opacities.clone()
 
-    def extend_from_pcd(self, fused_point_cloud, features, scales, rots, opacities):
-        self._xyz = nn.Parameter(torch.cat((self._xyz, fused_point_cloud), dim=0))
-        self._features_dc = nn.Parameter(
-            torch.cat((self._features_dc, features[:, :, 0:1]), dim=0)
-        )
-        self._features_rest = nn.Parameter(
-            torch.cat((self._features_rest, features[:, :, 1:]), dim=0)
-        )
-        self._scaling = nn.Parameter(torch.cat((self._scaling, scales), dim=0))
-        self._rotation = nn.Parameter(torch.cat((self._rotation, rots), dim=0))
-        self._opacity = nn.Parameter(torch.cat((self._opacity, opacities), dim=0))
+
+def convert_colors_to_features(colors, sh_degree=3, device="cuda"):
+    sh_colors = RGB2SH(colors.float())
+    features = torch.zeros(
+        (sh_colors.shape[0], 3, (sh_degree + 1) ** 2), device=device
+    ).float()
+    features[:, :3, 0] = sh_colors
+    features[:, 3:, 1:] = 0.0
+    return features
+
+
+def compute_scales(fused_point_cloud, device="cuda"):
+    dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
+    scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
+    return scales
+
+
+def get_gaussian_rots(num_points, device="cuda"):
+    rots = torch.zeros((num_points, 4), device=device).float()
+    rots[:, 0] = 1
+    return rots
+
+
+def get_gaussian_opacities(num_points, initial_opacity=1.0, device="cuda"):
+    opacities = inverse_sigmoid(
+        initial_opacity * torch.ones((num_points, 1), device=device).float()
+    )
+    return opacities
+
+
+def create_gaussian_params(fused_point_cloud, colors, sh_degree=3, device="cuda"):
+    features = convert_colors_to_features(colors)
+    scales = compute_scales(fused_point_cloud)
+    rots = get_gaussian_rots(fused_point_cloud.shape[0])
+    opacities = get_gaussian_opacities(fused_point_cloud.shape[0])
+    return features, scales, rots, opacities
