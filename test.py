@@ -1,12 +1,14 @@
 import math
+import time
 
 import torch
+from simple_knn._C import distCUDA2
 
 from gaussian_splatting.utils.general_utils import inverse_sigmoid
 from gaussian_splatting.utils.sh_utils import RGB2SH
 from camera import Camera, load_cam
 from gaussian_model import GaussianModel
-from render import render
+from viewer.viewer import Viewer
 
 
 def get_grid_points_2d(
@@ -72,15 +74,13 @@ def create_pcd_from_image_and_depth(
     features[:, :3, 0] = colors
     features[:, 3:, 1:] = 0.0
 
-    scales = torch.ones((fused_point_cloud.shape[0], 1), device=device) * torch.log(
-        torch.sqrt(torch.tensor([0.05], device=device))
-    )
-    scales = scales.float()
+    dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
+    scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
 
     rots = torch.zeros((fused_point_cloud.shape[0], 4), device=device).float()
     rots[:, 0] = 1
     opacities = inverse_sigmoid(
-        0.7 * torch.ones((fused_point_cloud.shape[0], 1), device=device).float()
+        1.0 * torch.ones((fused_point_cloud.shape[0], 1), device=device).float()
     )
 
     return fused_point_cloud, features, scales, rots, opacities
@@ -97,8 +97,8 @@ if __name__ == "__main__":
         create_pcd_from_image_and_depth(
             rgb=camera.image,
             depth=camera.depth,
-            num_verts_h=camera.image_height // 4,
-            num_verts_w=camera.image_width // 4,
+            num_verts_h=camera.image_height // 2,
+            num_verts_w=camera.image_width // 2,
             device=device,
         )
     )
@@ -118,20 +118,7 @@ if __name__ == "__main__":
     gaussians = GaussianModel(sh_degree=3)
     gaussians.create_from_pcd(fused_point_cloud, features, scales, rots, opacities)
 
-    import numpy as np
-    from gaussian_splatting.utils.graphics_utils import focal2fov
+    viewer = Viewer(gaussians=gaussians)
 
-    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-    T = np.array([0, 0, 0])
-    image = torch.zeros((3, 240, 480))
-
-    render_camera = Camera(
-        R=R,
-        T=T,
-        FovX=focal2fov(500, image.shape[2]),
-        FovY=focal2fov(500, image.shape[1]),
-        image=image,
-        depth=image,
-    )
-    output = render(render_camera, gaussians)
-    image = output["render"]
+    while True:
+        time.sleep(999)
