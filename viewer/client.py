@@ -34,7 +34,7 @@ class ClientThread(threading.Thread):
         R = w2c[:3, :3]
         T = w2c[:3, 3]
 
-        image = torch.zeros((3, 240, 480))
+        image = torch.zeros((3, 480, 960))
         render_camera = Camera(
             R=R,
             T=T,

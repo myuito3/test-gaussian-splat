@@ -14,12 +14,11 @@ from gaussian_model import GaussianModel, create_gaussian_params
 from viewer.viewer import Viewer
 
 
-def get_grid_points_2d(height, width, interval=1):
-    points_y = torch.linspace(0, height - 1, steps=height // interval)
-    points_x = torch.linspace(0, width - 1, steps=width // interval)
-    grid_points = torch.tensor(
-        [[x, y] for y in points_y for x in points_x], dtype=torch.float
-    )
+def get_grid_points_2d(height, width, interval=1, device="cuda"):
+    points_y = torch.linspace(0, height - 1, steps=height // interval, device=device)
+    points_x = torch.linspace(0, width - 1, steps=width // interval, device=device)
+    yy, xx = torch.meshgrid(points_y, points_x)
+    grid_points = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1)], dim=1)
     return grid_points
 
 
@@ -30,7 +29,7 @@ def create_pcd_from_equirectangular_image(rgb, depth=None, device="cuda"):
         depth_scale = 10
         depth = torch.ones((1, h, w), device=device) * depth_scale
 
-    grid_points = get_grid_points_2d(h, w, interval=2).to(device)
+    grid_points = get_grid_points_2d(h, w, interval=2)
 
     fused_point_cloud = torch.zeros((grid_points.shape[0], 3), device=device).float()
     radius = depth[0, grid_points[:, 1].long(), grid_points[:, 0].long()]
@@ -82,7 +81,7 @@ def main():
         print("runs only with cuda device, exit")
         return
 
-    data_dir = Path("data/test")
+    data_dir = Path("data/equ")
     with open(data_dir / "transforms.json", mode="r", encoding="utf-8") as f:
         meta = json.load(f)
 
@@ -99,10 +98,22 @@ def main():
     gaussians = GaussianModel(sh_degree=3)
     gaussians.create_from_params(fused_point_cloud, features, scales, rots, opacities)
 
-    _ = Viewer(gaussians=gaussians)
+    viewer = Viewer(gaussians=gaussians)
 
     while True:
-        time.sleep(999)
+        for camera in camera_list:
+            fused_point_cloud, colors = create_pcd_from_equirectangular_image(
+                rgb=camera.image, depth=camera.depth
+            )
+            features, scales, rots, opacities = create_gaussian_params(
+                fused_point_cloud, colors
+            )
+            gaussians.create_from_params(
+                fused_point_cloud, features, scales, rots, opacities
+            )
+            viewer.update_scene(gaussians)
+
+            time.sleep(1)
 
 
 if __name__ == "__main__":

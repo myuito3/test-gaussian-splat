@@ -11,6 +11,7 @@
 
 import torch
 from simple_knn._C import distCUDA2
+from torch import Tensor
 
 from gaussian_splatting.utils.general_utils import (
     inverse_sigmoid,
@@ -104,7 +105,7 @@ class GaussianModel:
         self._opacity = opacities.clone()
 
 
-def convert_colors_to_features(colors, sh_degree=3, device="cuda"):
+def convert_colors_to_features(colors: Tensor, sh_degree=3, device="cuda"):
     sh_colors = RGB2SH(colors.float())
     features = torch.zeros(
         (sh_colors.shape[0], 3, (sh_degree + 1) ** 2), device=device
@@ -114,26 +115,26 @@ def convert_colors_to_features(colors, sh_degree=3, device="cuda"):
     return features
 
 
-def compute_scales(fused_point_cloud, device="cuda"):
-    dist2 = torch.clamp_min(distCUDA2(fused_point_cloud), 0.0000001)
+def compute_scales(fused_point_cloud: Tensor, device="cuda"):
+    dist2 = torch.clamp_min(distCUDA2(fused_point_cloud.to(device)), 0.0000001)
     scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
     return scales
 
 
-def get_gaussian_rots(num_points, device="cuda"):
+def get_gaussian_rots(num_points: int, device="cuda"):
     rots = torch.zeros((num_points, 4), device=device).float()
     rots[:, 0] = 1
     return rots
 
 
-def get_gaussian_opacities(num_points, initial_opacity=1.0, device="cuda"):
+def get_gaussian_opacities(num_points: int, initial_opacity=1.0, device="cuda"):
     opacities = inverse_sigmoid(
         initial_opacity * torch.ones((num_points, 1), device=device).float()
     )
     return opacities
 
 
-def create_gaussian_params(fused_point_cloud, colors, sh_degree=3, device="cuda"):
+def create_gaussian_params(fused_point_cloud: Tensor, colors: Tensor):
     features = convert_colors_to_features(colors)
     scales = compute_scales(fused_point_cloud)
     rots = get_gaussian_rots(fused_point_cloud.shape[0])
